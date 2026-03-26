@@ -1,0 +1,30 @@
+{
+    "parent": "configs/calvin_finetune/finetune_kosmos_cont-lstm-post_full-ft_text_vision_wd-0_ws-8_act-10.json",
+    "task_name": "calvin_full_amlt",
+    "batch_size": 8,
+    "num_workers": 8,
+    "model_path": ".vlms/kosmos-2-patch14-224",
+    "model_config": ".vlms/kosmos-2-patch14-224/config.json",
+    "output_root": "/mnt/wangxiaofa/robovlms_runs/checkpoints",
+    "log_root": "/mnt/wangxiaofa/robovlms_runs/logs",
+    "cache_root": "/mnt/wangxiaofa/robovlms_runs/cache",
+    "tokenizer": {
+        "pretrained_model_name_or_path": ".vlms/kosmos-2-patch14-224"
+    },
+    "vlm": {
+        "pretrained_model_name_or_path": ".vlms/kosmos-2-patch14-224"
+    },
+    "trainer": {
+        "strategy": "ddp",
+        "precision": "16",
+        "log_every_n_steps": 10,
+        "max_epochs": 5,
+        "max_steps": -1
+    },
+    "train_dataset": {
+        "data_dir": "/mnt/robotdata/robot_dataset/calvin_abc_d/task_ABC_D/training"
+    },
+    "val_dataset": {
+        "data_dir": "/mnt/robotdata/robot_dataset/calvin_abc_d/task_ABC_D/validation"
+    }
+}

@@ -23,6 +23,9 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 
+logger = logging.getLogger(__name__)
+hasher = None
+
 try:
     from calvin_agent.datasets.utils.episode_utils import (
         get_state_info_dict,
@@ -33,17 +36,18 @@ try:
         process_state,
     )
     from calvin_agent.datasets.utils.episode_utils import lookup_naming_pattern
-
-    import pyhash
-    import torch
-    from torch.utils.data import Dataset
-    from robovlms.data.data_utils import get_prompt_builder, world_to_tcp_frame
-    from robovlms.model.policy_head.action_tokenizer import ActionTokenizer
-
-    hasher = pyhash.fnv1_32()
-    logger = logging.getLogger(__name__)
 except:
     pass
+
+try:
+    import pyhash
+
+    hasher = pyhash.fnv1_32()
+except:
+    pass
+
+from robovlms.data.data_utils import get_prompt_builder, world_to_tcp_frame
+from robovlms.model.policy_head.action_tokenizer import ActionTokenizer
 
 Image.MAX_IMAGE_PIXELS = 1000000000
 MAX_NUM_TOKENS = 256

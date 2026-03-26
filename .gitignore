@@ -198,3 +198,13 @@ runs/
 .vlms/
 .DS_Store
 .DS_Store?
+
+# Explicitly ignore local data/artifacts for this workspace
+calvin/dataset/
+calvin_data/
+datasets/
+runs/
+.vlms/
+*.ckpt
+*.safetensors
+*.bin

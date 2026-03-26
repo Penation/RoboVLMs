@@ -1,0 +1,30 @@
+{
+    "parent": "configs/calvin_finetune/finetune_kosmos_cont-lstm-post_full-ft_text_vision_wd-0_ws-8_act-10.json",
+    "task_name": "calvin_debug_smoke",
+    "batch_size": 1,
+    "num_workers": 1,
+    "model_path": ".vlms/kosmos-2-patch14-224",
+    "model_config": ".vlms/kosmos-2-patch14-224/config.json",
+    "tokenizer": {
+        "pretrained_model_name_or_path": ".vlms/kosmos-2-patch14-224"
+    },
+    "vlm": {
+        "pretrained_model_name_or_path": ".vlms/kosmos-2-patch14-224"
+    },
+    "trainer": {
+        "strategy": "ddp",
+        "precision": "16",
+        "log_every_n_steps": 1,
+        "max_epochs": 1,
+        "max_steps": 1,
+        "limit_train_batches": 1,
+        "limit_val_batches": 1,
+        "num_sanity_val_steps": 0
+    },
+    "train_dataset": {
+        "data_dir": "calvin/dataset/calvin_debug_dataset/training"
+    },
+    "val_dataset": {
+        "data_dir": "calvin/dataset/calvin_debug_dataset/validation"
+    }
+}

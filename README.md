@@ -78,7 +78,9 @@ conda create -n robovlms python=3.10 -y
 # ===================================
 
 conda activate robovlms
-conda install cudatoolkit cudatoolkit-dev -y
+# `cudatoolkit-dev` is provided by conda-forge rather than defaults.
+# Pin CPython explicitly to avoid conda resolving to GraalPy, which breaks PyTorch wheels.
+conda install -c conda-forge -c defaults python=3.8.10=*_cpython cudatoolkit=11.7 cudatoolkit-dev=11.7 -y
 pip install -e .
 
 # For training on OXE dataset, use our fork of openvla

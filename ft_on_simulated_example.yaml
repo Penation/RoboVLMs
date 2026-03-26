@@ -1,0 +1,68 @@
+description: RoboVLMs AMLT template (reproducible robovlms env on cluster)
+
+env_defaults:
+  NODES: 1
+  GPUS: 2
+  MEM: 80
+  JOB_NAME: robovlms-calvin
+
+target:
+  service: sing
+  workspace_name: wsgcrrbt
+  name: msrresrchvc
+
+storage:
+  my_output:
+    storage_account_name: azsussc
+    container_name: v-wangxiaofa
+    mount_dir: /mnt/wangxiaofa
+  data:
+    storage_account_name: azsussc
+    container_name: v-wangxiaofa
+    mount_dir: /mnt/robotdata
+    is_output: false
+
+environment:
+  image: amlt-sing/acpt-torch2.7.1-py3.10-cuda12.6-ubuntu22.04
+  setup:
+    - conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+    - conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+    - conda env remove -n robovlms -y || true
+    - conda env create -n robovlms -f envs/robovlms.amlt.yml
+    - conda run --name robovlms pip install -e .
+    - test -d calvin || git clone --recurse-submodules https://github.com/mees/calvin.git
+    - git -C calvin checkout fa03f01f19c65920e18cf37398a9ce859274af76
+    - git -C calvin submodule update --init --recursive
+    - conda run --name robovlms pip install -e calvin/calvin_env
+    - conda run --name robovlms pip install -e calvin/calvin_models --no-deps
+    - conda run --name robovlms pip install moviepy==1.0.3 termcolor==2.4.0
+    - conda run --name robovlms python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='microsoft/kosmos-2-patch14-224', local_dir='.vlms/kosmos-2-patch14-224')"
+    - conda run --name robovlms python -c "import torch, hydra, pybullet, pyrender; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
+
+code:
+  local_dir: $CONFIG_DIR/
+
+data:
+  storage_id: my_output
+
+jobs:
+  - name: $JOB_NAME
+    sku: ${NODES}x${MEM}G${GPUS}-A100
+    process_count_per_node: ${GPUS}
+    sla_tier: Premium
+    execution_mode: basic
+    identity: managed
+    submit_args:
+      env:
+        AMLT_DOCKERFILE_TEMPLATE: default
+        _AZUREML_SINGULARITY_JOB_UAI: /subscriptions/3289a5dd-b901-4b63-9562-bbbdfffba9de/resourcegroups/ws/providers/Microsoft.ManagedIdentity/userAssignedIdentities/wsgcrrbt-identity
+        SHARED_MEMORY_PERCENT: 0.5
+
+    command:
+      - pwd
+      - nvidia-smi
+      - conda run --name robovlms python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+      # Example: single-node training smoke test
+      # - conda run --name robovlms torchrun --standalone --nnodes=1 --nproc_per_node=1 main.py configs/calvin_finetune/debug_kosmos_real_calvin.json --exp_name $JOB_NAME --gpus 1 --num_nodes 1
+      # Example: distributed training
+      # - conda run --name robovlms torchrun --nproc_per_node=$GPUS --nnodes=$NODES --node_rank=$$AZUREML_CR_NODE_RANK --master_addr=$$AZ_BATCHAI_JOB_MASTER_NODE_IP --master_port=9901 main.py configs/calvin_finetune/finetune_kosmos_cont-lstm-post_full-ft_text_vision_wd-0_ws-8_act-10.json --exp_name $JOB_NAME --gpus $GPUS --num_nodes $NODES

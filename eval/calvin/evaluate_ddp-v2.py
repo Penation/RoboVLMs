@@ -8,18 +8,30 @@ import time
 from collections import Counter, defaultdict, namedtuple
 from moviepy.editor import ImageSequenceClip
 import copy
-from robovlms.utils.zero_to_fp32 import convert_zero_checkpoint_to_fp32_state_dict
 from tqdm.auto import tqdm
 import sys
 import os
 import hydra
 from omegaconf import OmegaConf
 from termcolor import colored
+import numpy as np
 
 sys.path.insert(0, Path(__file__).absolute().parents[2].as_posix())
 import torch.multiprocessing as mp
 
 os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+
+# CALVIN depends on urdfpy/networkx versions that still use removed numpy aliases.
+for alias, value in {
+    "bool": bool,
+    "float": float,
+    "int": int,
+    "object": object,
+    "str": str,
+}.items():
+    if alias not in np.__dict__:
+        setattr(np, alias, value)
+
 import pyrender
 
 from calvin_agent.evaluation.multistep_sequences import get_sequences
@@ -43,27 +55,66 @@ from robovlms.utils.config_utils import load_config
 
 from model_wrapper import CustomModel
 from eval_utils import print_and_save
-from open_flamingo.train.distributed import init_distributed_device, world_info_from_env
 
 logger = logging.getLogger(__name__)
 
 EP_LEN = 360
 NUM_SEQUENCES = 1000
 # NUM_SEQUENCES = 16
+CALVIN_CAM_OBS_SPACE = {
+    "rgb_obs": ["rgb_static", "rgb_gripper"],
+    "depth_obs": ["depth_static", "depth_gripper"],
+}
 
 CACHE_ROOT = "eval/logs"
-os.system(f"sudo mkdir -p {CACHE_ROOT}")
-os.system(f"sudo chmod 777 {CACHE_ROOT}")
+os.makedirs(CACHE_ROOT, exist_ok=True)
+REPO_ROOT = Path(__file__).absolute().parents[2]
+
+
+def resolve_calvin_conf_dir():
+    candidates = [
+        REPO_ROOT / "calvin" / "calvin_models" / "conf",
+        REPO_ROOT / "calvin_models" / "conf",
+        Path("/mnt/bn/robotics/resources/calvin/calvin_models/conf"),
+    ]
+    for conf_dir in candidates:
+        if conf_dir.exists():
+            return conf_dir
+    raise FileNotFoundError(
+        "Cannot find CALVIN conf dir. Checked: "
+        + ", ".join([str(c) for c in candidates])
+    )
+
+
+def resolve_eval_sequences_path():
+    candidates = [
+        REPO_ROOT / "configs" / "data" / "calvin" / "eval_sequences.json",
+        REPO_ROOT / "eval_sequences.json",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    raise FileNotFoundError(
+        "Cannot find eval_sequences.json. Checked: "
+        + ", ".join([str(c) for c in candidates])
+    )
 
 
 def make_env(dataset_path):
     val_folder = Path(dataset_path) / "validation"
-    return get_env(val_folder, show_gui=False)
+    return get_env(val_folder, obs_space=CALVIN_CAM_OBS_SPACE, show_gui=False)
 
 
 def setup():
     dist.init_process_group(backend="nccl")
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+
+
+def world_info_from_env():
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    rank = int(os.environ.get("RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    return local_rank, rank, world_size
 
 
 def evaluate_policy(
@@ -78,8 +129,7 @@ def evaluate_policy(
     diverse_inst=False,
 ):
     """Run this function to evaluate a model on the CALVIN challenge."""
-    # conf_dir = Path("path/to/calvin/calvin_models") / "conf"
-    conf_dir = Path("/mnt/bn/robotics/resources/calvin/calvin_models") / "conf"
+    conf_dir = resolve_calvin_conf_dir()
     task_cfg = OmegaConf.load(
         conf_dir / "callbacks/rollout/tasks/new_playtable_tasks.yaml"
     )
@@ -95,7 +145,7 @@ def evaluate_policy(
     eval_log_dir = get_log_dir(eval_log_dir)
 
     # eval_sequences = get_sequences(NUM_SEQUENCES)
-    with open("configs/data/calvin/eval_sequences.json", "r") as f:
+    with open(resolve_eval_sequences_path(), "r") as f:
         eval_sequences = json.load(f)
     eval_sequences = eval_sequences[:NUM_SEQUENCES]
     eval_sequences = eval_sequences[rank::world_size]
@@ -172,7 +222,7 @@ def evaluate_policy_ddp(
         Dictionary with results
     """
     epoch = 0
-    conf_dir = Path("path/to/calvin/calvin_models") / "conf"
+    conf_dir = resolve_calvin_conf_dir()
     task_cfg = OmegaConf.load(
         conf_dir / "callbacks/rollout/tasks/new_playtable_tasks.yaml"
     )
@@ -317,6 +367,10 @@ def rollout(
 
     for _ in range(EP_LEN):
         action = model.step(obs, lang_annotation)
+        if isinstance(action, torch.Tensor):
+            action = action.detach().cpu().float().numpy()
+        if isinstance(action, np.ndarray):
+            action = action.astype(np.float32)
         obs, _, _, current_info = env.step(action)
         if debug:
             img_copy = copy.deepcopy(obs["rgb_obs"]["rgb_static"])
@@ -396,6 +450,12 @@ def parser_args():
     parser.add_argument("--raw_calvin", action="store_true")
     parser.add_argument("--debug_model", action="store_true")
     parser.add_argument("--diverse_inst", action="store_true")
+    parser.add_argument(
+        "--num_sequences",
+        type=int,
+        default=None,
+        help="Override number of evaluation sequences for smoke testing.",
+    )
 
     args = parser.parse_args()
     return args
@@ -403,6 +463,9 @@ def parser_args():
 
 def main():
     args = parser_args()
+    global NUM_SEQUENCES
+    if args.num_sequences is not None:
+        NUM_SEQUENCES = args.num_sequences
     setup()
     config_path = args.config_path
     ckpt_dir = args.ckpt_dir
@@ -443,6 +506,8 @@ def main():
 
     # Handle DeepSpeed ckpt
     if os.path.isdir(ckpt_path):
+        from robovlms.utils.zero_to_fp32 import convert_zero_checkpoint_to_fp32_state_dict
+
         target_ckpt_path = ckpt_path.replace(".ckpt", ".pt")
         if dist.get_rank() == 0:
             print(f"converting {ckpt_path} to {target_ckpt_path}")
@@ -458,8 +523,7 @@ def main():
         eval_log_dir = ckpt_dir
     else:
         eval_log_dir = os.path.join(CACHE_ROOT, eval_exp_name)
-    os.system(f"sudo mkdir {eval_log_dir}")
-    os.system(f"sudo chmod 777 -R {eval_log_dir}")
+    os.makedirs(eval_log_dir, exist_ok=True)
 
     args.local_rank, args.rank, args.world_size = world_info_from_env()
     model = CustomModel(
@@ -509,7 +573,7 @@ def main():
     )
 
     # gather results
-    with open("eval_sequences.json", "r") as f:
+    with open(resolve_eval_sequences_path(), "r") as f:
         eval_sequences = json.load(f)
     eval_sequences = eval_sequences[:NUM_SEQUENCES]
     eval_sequences = eval_sequences[args.rank :: args.world_size]

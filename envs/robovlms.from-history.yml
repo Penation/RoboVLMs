@@ -1,0 +1,10 @@
+name: robovlms
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8.19
+  - cudatoolkit-dev=11.7
+  - cudatoolkit=11.7
+  - gcc=12.1.0
+  - gxx_linux-64

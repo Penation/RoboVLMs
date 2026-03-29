@@ -10,7 +10,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Iterator, List, Tuple
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,8 +49,44 @@ def format_bytes(num_bytes: float) -> str:
     return f"{num_bytes:.2f} B"
 
 
-def list_files(root: Path) -> List[Path]:
-    return sorted(path.relative_to(root) for path in root.rglob("*") if path.is_file())
+def iter_files(root: Path) -> Iterator[Path]:
+    for path in root.rglob("*"):
+        if path.is_file():
+            yield path.relative_to(root)
+
+
+def collect_files(root: Path) -> Tuple[List[Path], int]:
+    files: List[Path] = []
+    total_bytes = 0
+    start_time = time.time()
+    last_report = start_time
+
+    print(f"[scan] start root={root}", flush=True)
+    for idx, rel_path in enumerate(iter_files(root), start=1):
+        src = root / rel_path
+        try:
+            total_bytes += src.stat().st_size
+        except FileNotFoundError:
+            continue
+        files.append(rel_path)
+
+        now = time.time()
+        if idx == 1 or now - last_report >= 5.0:
+            elapsed = max(now - start_time, 1e-6)
+            print(
+                f"[scan] files={idx} size={format_bytes(total_bytes)} "
+                f"rate={idx / elapsed:.1f} files/s elapsed={elapsed:.1f}s",
+                flush=True,
+            )
+            last_report = now
+
+    elapsed = max(time.time() - start_time, 1e-6)
+    print(
+        f"[scan] done files={len(files)} total_size={format_bytes(total_bytes)} "
+        f"elapsed={elapsed:.1f}s",
+        flush=True,
+    )
+    return files, total_bytes
 
 
 def disk_free_bytes(path: Path) -> int:
@@ -123,9 +159,8 @@ def main() -> int:
         return 1
 
     dst_root.mkdir(parents=True, exist_ok=True)
-    files = list_files(src_root)
+    files, total_bytes = collect_files(src_root)
     total_files = len(files)
-    total_bytes = sum((src_root / rel).stat().st_size for rel in files)
     free_bytes = disk_free_bytes(dst_root)
 
     print(f"[copy] source={src_root}", flush=True)

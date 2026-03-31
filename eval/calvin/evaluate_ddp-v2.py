@@ -6,20 +6,29 @@ import logging
 from pathlib import Path
 import time
 from collections import Counter, defaultdict, namedtuple
-from moviepy.editor import ImageSequenceClip
+try:
+    from moviepy.editor import ImageSequenceClip
+except ImportError:
+    ImageSequenceClip = None
 import copy
 from tqdm.auto import tqdm
 import sys
 import os
 import hydra
 from omegaconf import OmegaConf
-from termcolor import colored
+try:
+    from termcolor import colored
+except ImportError:
+    def colored(text, *_args, **_kwargs):
+        return text
 import numpy as np
 
 sys.path.insert(0, Path(__file__).absolute().parents[2].as_posix())
 import torch.multiprocessing as mp
 
-os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+# Prefer EGL on headless GPU clusters and only fall back if the environment
+# explicitly requests something else.
+os.environ["PYOPENGL_PLATFORM"] = os.environ.get("PYOPENGL_PLATFORM", "egl")
 
 # CALVIN depends on urdfpy/networkx versions that still use removed numpy aliases.
 for alias, value in {
@@ -31,8 +40,6 @@ for alias, value in {
 }.items():
     if alias not in np.__dict__:
         setattr(np, alias, value)
-
-import pyrender
 
 from calvin_agent.evaluation.multistep_sequences import get_sequences
 from calvin_agent.evaluation.utils import (
@@ -115,6 +122,15 @@ def world_info_from_env():
     rank = int(os.environ.get("RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     return local_rank, rank, world_size
+
+
+def write_debug_gif(img_list, output_path):
+    if ImageSequenceClip is None:
+        raise RuntimeError(
+            "moviepy is required for debug gif export. Install moviepy to use --debug."
+        )
+    clip = ImageSequenceClip(img_list, fps=30)
+    clip.write_gif(output_path, fps=30)
 
 
 def evaluate_policy(
@@ -383,21 +399,19 @@ def rollout(
         if len(current_task_info) > 0:
             if debug:
                 print(colored("success", "green"), end=" ")
-                clip = ImageSequenceClip(img_list, fps=30)
-                clip.write_gif(
+                write_debug_gif(
+                    img_list,
                     os.path.join(
                         eval_log_dir, f"{sequence_i}-{subtask_i}-{subtask}-succ.gif"
                     ),
-                    fps=30,
                 )
             return True
 
     if debug:
         print(colored("fail", "red"), end=" ")
-        clip = ImageSequenceClip(img_list, fps=30)
-        clip.write_gif(
+        write_debug_gif(
+            img_list,
             os.path.join(eval_log_dir, f"{sequence_i}-{subtask_i}-{subtask}-fail.gif"),
-            fps=30,
         )
     return False
 

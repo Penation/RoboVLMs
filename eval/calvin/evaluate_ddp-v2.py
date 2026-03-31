@@ -109,7 +109,12 @@ def resolve_eval_sequences_path():
 
 def make_env(dataset_path):
     val_folder = Path(dataset_path) / "validation"
-    return get_env(val_folder, obs_space=CALVIN_CAM_OBS_SPACE, show_gui=False)
+    return get_env(
+        val_folder,
+        obs_space=CALVIN_CAM_OBS_SPACE,
+        show_gui=False,
+        use_egl=False,
+    )
 
 
 def setup():

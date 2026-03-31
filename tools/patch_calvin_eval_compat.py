@@ -96,7 +96,74 @@ def patch_play_table_env(calvin_root: Path) -> None:
         path=path,
         label="render guard",
     )
+    text = replace_once(
+        text,
+        "    if not hydra.core.global_hydra.GlobalHydra.instance().is_initialized():\n"
+        "        hydra.initialize(\".\")\n"
+        "    env = hydra.utils.instantiate(render_conf.env, show_gui=show_gui, use_vr=False, use_scene_info=True)\n",
+        "    render_conf.env.use_egl = kwargs.get(\"use_egl\", False)\n"
+        "    if not hydra.core.global_hydra.GlobalHydra.instance().is_initialized():\n"
+        "        hydra.initialize(\".\")\n"
+        "    env = hydra.utils.instantiate(\n"
+        "        render_conf.env,\n"
+        "        show_gui=show_gui,\n"
+        "        use_vr=False,\n"
+        "        use_scene_info=True,\n"
+        "        use_egl=kwargs.get(\"use_egl\", False),\n"
+        "    )\n",
+        path=path,
+        label="get_env use_egl override",
+    )
     path.write_text(text)
+
+
+def patch_cameras_for_tiny_renderer(calvin_root: Path) -> None:
+    camera_files = [
+        calvin_root / "calvin_env" / "calvin_env" / "camera" / "static_camera.py",
+        calvin_root / "calvin_env" / "calvin_env" / "camera" / "gripper_camera.py",
+    ]
+    for path in camera_files:
+        text = path.read_text()
+        text = replace_once(
+            text,
+            "        image = p.getCameraImage(\n"
+            "            width=self.width,\n"
+            "            height=self.height,\n"
+            "            viewMatrix=self.viewMatrix,\n"
+            "            projectionMatrix=self.projectionMatrix,\n"
+            "            physicsClientId=self.cid,\n"
+            "        )\n",
+            "        image = p.getCameraImage(\n"
+            "            width=self.width,\n"
+            "            height=self.height,\n"
+            "            viewMatrix=self.viewMatrix,\n"
+            "            projectionMatrix=self.projectionMatrix,\n"
+            "            renderer=p.ER_TINY_RENDERER,\n"
+            "            physicsClientId=self.cid,\n"
+            "        )\n",
+            path=path,
+            label="tiny renderer static camera",
+        ) if path.name == "static_camera.py" else replace_once(
+            text,
+            "        image = p.getCameraImage(\n"
+            "            width=self.width,\n"
+            "            height=self.height,\n"
+            "            viewMatrix=self.view_matrix,\n"
+            "            projectionMatrix=self.projection_matrix,\n"
+            "            physicsClientId=self.cid,\n"
+            "        )\n",
+            "        image = p.getCameraImage(\n"
+            "            width=self.width,\n"
+            "            height=self.height,\n"
+            "            viewMatrix=self.view_matrix,\n"
+            "            projectionMatrix=self.projection_matrix,\n"
+            "            renderer=p.ER_TINY_RENDERER,\n"
+            "            physicsClientId=self.cid,\n"
+            "        )\n",
+            path=path,
+            label="tiny renderer gripper camera",
+        )
+        path.write_text(text)
 
 
 def main() -> None:
@@ -108,6 +175,7 @@ def main() -> None:
     patch_calvin_agent_utils(calvin_root)
     patch_calvin_eval_utils(calvin_root)
     patch_play_table_env(calvin_root)
+    patch_cameras_for_tiny_renderer(calvin_root)
     print(f"Patched CALVIN compatibility files under {calvin_root}")
 
 

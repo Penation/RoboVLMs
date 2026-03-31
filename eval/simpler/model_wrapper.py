@@ -9,7 +9,7 @@ import json
 from transforms3d.euler import euler2axangle
 
 from robovlms.train.base_trainer import BaseTrainer
-from eval.calvin.model_wrapper import CustomModel
+from eval.calvin.model_wrapper import CustomModel, patch_kosmos_transformers
 
 
 class BaseModelInference(CustomModel):
@@ -25,6 +25,8 @@ class BaseModelInference(CustomModel):
     ):
         self.configs = configs
         self.dataset_stat = self.load_dataset_stat()
+        if configs["model"] == "kosmos":
+            patch_kosmos_transformers()
         self.model = BaseTrainer(configs=configs)
         self.policy = self.model
 

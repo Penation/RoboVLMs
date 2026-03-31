@@ -25,6 +25,17 @@ from robovlms.model.policy_head.action_tokenizer import ActionTokenizer
 fwd_decay_ratio = 1
 
 
+def patch_kosmos_transformers():
+    import transformers
+
+    package_dir = transformers.__path__[0]
+    os.system(
+        "cp tools/modeling_kosmos2.py {}/models/kosmos2/modeling_kosmos2.py".format(
+            package_dir
+        )
+    )
+
+
 class CustomModel:
     # model option
     def __init__(
@@ -37,6 +48,8 @@ class CustomModel:
         debug=False,
         action_ensemble=False,
     ):
+        if configs["model"] == "kosmos":
+            patch_kosmos_transformers()
         self.model = BaseTrainer(configs=configs)
         self.init_config(ckpt_path, configs, device, save_dir, raw_calvin, debug)
         # self.model.model.lm_head.window_size = 1
@@ -47,14 +60,7 @@ class CustomModel:
         ### load and convert checkpoint
         self.debug = debug
         if configs["model"] == "kosmos":
-            import transformers
-
-            package_dir = transformers.__path__[0]
-            os.system(
-                "cp tools/modeling_kosmos2.py {}/models/kosmos2/modeling_kosmos2.py".format(
-                    package_dir
-                )
-            )
+            patch_kosmos_transformers()
 
         if not self.debug:
             ckpt = torch.load(ckpt_path, map_location="cpu")

@@ -36,6 +36,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Overwrite destination files even if the size already matches.",
     )
+    parser.add_argument(
+        "--progress-seconds",
+        type=float,
+        default=5.0,
+        help="Progress report interval in seconds.",
+    )
     return parser.parse_args()
 
 
@@ -49,13 +55,27 @@ def format_bytes(num_bytes: float) -> str:
     return f"{num_bytes:.2f} B"
 
 
+def format_duration(seconds: float | None) -> str:
+    if seconds is None or seconds < 0 or not (seconds < float("inf")):
+        return "N/A"
+
+    seconds = int(seconds)
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours:d}h{minutes:02d}m{secs:02d}s"
+    if minutes:
+        return f"{minutes:d}m{secs:02d}s"
+    return f"{secs:d}s"
+
+
 def iter_files(root: Path) -> Iterator[Path]:
     for path in root.rglob("*"):
         if path.is_file():
             yield path.relative_to(root)
 
 
-def collect_files(root: Path) -> Tuple[List[Path], int]:
+def collect_files(root: Path, progress_seconds: float) -> Tuple[List[Path], int]:
     files: List[Path] = []
     total_bytes = 0
     start_time = time.time()
@@ -71,7 +91,7 @@ def collect_files(root: Path) -> Tuple[List[Path], int]:
         files.append(rel_path)
 
         now = time.time()
-        if idx == 1 or now - last_report >= 5.0:
+        if idx == 1 or now - last_report >= progress_seconds:
             elapsed = max(now - start_time, 1e-6)
             print(
                 f"[scan] files={idx} size={format_bytes(total_bytes)} "
@@ -132,18 +152,24 @@ def print_progress(
     total_files: int,
     copied_bytes: int,
     skipped_bytes: int,
+    total_bytes: int,
     failed: int,
     start_time: float,
 ) -> None:
     elapsed = max(time.time() - start_time, 1e-6)
-    rate = copied_bytes / elapsed
+    accounted_bytes = copied_bytes + skipped_bytes
+    rate = accounted_bytes / elapsed
+    remaining_bytes = max(total_bytes - accounted_bytes, 0)
+    eta = (remaining_bytes / rate) if rate > 0 else None
     message = (
         f"[copy] files={processed}/{total_files} "
         f"copied={format_bytes(copied_bytes)} "
         f"skipped={format_bytes(skipped_bytes)} "
+        f"remaining={format_bytes(remaining_bytes)} "
         f"failed={failed} "
         f"rate={format_bytes(rate)}/s "
-        f"elapsed={elapsed:.1f}s"
+        f"elapsed={elapsed:.1f}s "
+        f"eta={format_duration(eta)}"
     )
     print(message, flush=True)
 
@@ -159,7 +185,7 @@ def main() -> int:
         return 1
 
     dst_root.mkdir(parents=True, exist_ok=True)
-    files, total_bytes = collect_files(src_root)
+    files, total_bytes = collect_files(src_root, args.progress_seconds)
     total_files = len(files)
     free_bytes = disk_free_bytes(dst_root)
 
@@ -215,12 +241,13 @@ def main() -> int:
                 print(f"[copy][error] {rel_path}: {exc}", file=sys.stderr, flush=True)
 
             now = time.time()
-            if processed == total_files or now - last_report >= 5.0:
+            if processed == total_files or now - last_report >= args.progress_seconds:
                 print_progress(
                     processed,
                     total_files,
                     copied_bytes,
                     skipped_bytes,
+                    total_bytes,
                     failed,
                     start_time,
                 )

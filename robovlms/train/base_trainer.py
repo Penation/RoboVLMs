@@ -556,7 +556,7 @@ class BaseTrainer(pl.LightningModule):
                 output,
                 phase="val",
                 prog_bar_set=prog_bar_set,
-                sync_dist=True,
+                sync_dist=False,
                 on_epoch=True,
                 on_step=False,
                 dataset=dataset,
